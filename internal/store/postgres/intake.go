@@ -10,6 +10,26 @@ import (
 	"github.com/jiahuipaung/rc_pangjiahui/internal/notification"
 )
 
+func (store *Store) CreateOrGet(ctx context.Context, task notification.Task, event notification.OutboxEvent) (*notification.Task, error) {
+	err := store.WithTx(ctx, func(tx Tx) error {
+		if err := tx.CreateNotification(ctx, task); err != nil {
+			return err
+		}
+		return tx.InsertOutbox(ctx, event)
+	})
+	if err == nil {
+		return nil, nil
+	}
+	if !errors.Is(err, ErrIdempotencyConflict) {
+		return nil, err
+	}
+	existing, getErr := store.GetByCallerAndKey(ctx, task.CallerID, task.IdempotencyKey)
+	if getErr != nil {
+		return nil, getErr
+	}
+	return &existing, nil
+}
+
 func (tx transaction) CreateNotification(ctx context.Context, task notification.Task) error {
 	staticHeaders, err := json.Marshal(task.Snapshot.StaticHeaders)
 	if err != nil {
