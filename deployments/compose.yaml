@@ -1,0 +1,81 @@
+name: rc-notifier
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: deployments/Dockerfile
+  restart: unless-stopped
+  environment: &app-env
+    DATABASE_URL: postgres://notifier:notifier@postgres:5432/notifier?sslmode=disable
+    RABBITMQ_URL: amqp://notifier:notifier@rabbitmq:5672/
+    DESTINATIONS_FILE: /etc/notifier/destinations.yaml
+    INVENTORY_API_TOKEN: development-placeholder
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: notifier
+      POSTGRES_PASSWORD: notifier
+      POSTGRES_DB: notifier
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notifier -d notifier"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  rabbitmq:
+    image: rabbitmq:4.1-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: notifier
+      RABBITMQ_DEFAULT_PASS: notifier
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile
+      target: migration
+    environment:
+      PGPASSWORD: notifier
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "notifier", "-d", "notifier", "-f", "/migrations/000001_initial.up.sql"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    command: ["-role", "api"]
+    environment:
+      <<: *app-env
+      HTTP_ADDR: :8080
+      CALLER_TOKENS: caller-development-token:orders
+      ADMIN_TOKENS: admin-development-token:operator
+    ports:
+      - "8080:8080"
+
+  publisher:
+    <<: *app
+    command: ["-role", "publisher"]
+
+  worker:
+    <<: *app
+    command: ["-role", "worker"]
+
+  scheduler:
+    <<: *app
+    command: ["-role", "scheduler"]
+
+volumes:
+  postgres-data:

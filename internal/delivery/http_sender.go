@@ -104,7 +104,7 @@ func (sender *HTTPSender) Send(parent context.Context, snapshot notification.Del
 		}
 		return Result{Outcome: notification.Retryable, ErrorCode: "transport_error", ErrorMessage: sanitize(err.Error(), sender.limit)}
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(response.Body, sender.limit))
 	outcome := notification.ClassifyResult(response.StatusCode, nil)
 	result := Result{Outcome: outcome, HTTPStatus: response.StatusCode, ErrorMessage: sanitize(string(body), sender.limit)}

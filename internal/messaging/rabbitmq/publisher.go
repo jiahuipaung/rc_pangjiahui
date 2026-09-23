@@ -84,3 +84,10 @@ func (client *Client) Close() error {
 	channelErr := client.channel.Close()
 	return errors.Join(channelErr, connectionErr)
 }
+
+func (client *Client) Healthy() error {
+	if client.connection.IsClosed() {
+		return errors.New("rabbitmq connection is closed")
+	}
+	return nil
+}

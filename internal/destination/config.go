@@ -26,6 +26,20 @@ type Registry struct {
 	items map[string]Destination
 }
 
+func NewRegistry(destinations []Destination) (Registry, error) {
+	items := make(map[string]Destination, len(destinations))
+	for _, candidate := range destinations {
+		if candidate.ID == "" || candidate.URL == nil {
+			return Registry{}, fmt.Errorf("destination id and URL are required")
+		}
+		if _, exists := items[candidate.ID]; exists {
+			return Registry{}, fmt.Errorf("duplicate destination %q", candidate.ID)
+		}
+		items[candidate.ID] = clone(candidate)
+	}
+	return Registry{items: items}, nil
+}
+
 func (r Registry) Get(id string) (Destination, bool) {
 	destination, ok := r.items[id]
 	if !ok {
