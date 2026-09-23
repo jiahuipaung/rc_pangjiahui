@@ -56,6 +56,7 @@ For direct process execution, set the role-specific variables and run `go run ./
 | `CALLER_TOKENS` | API, all | comma-separated `token:caller-id` entries |
 | `ADMIN_TOKENS` | API, all | comma-separated `token:operator-id` entries |
 | `HTTP_ADDR` | API, all | listen address, default `:8080` |
+| `METRICS_ADDR` | publisher, worker, scheduler | internal health/metrics address, default `:9090` |
 
 Destination secrets are environment-variable references in YAML. Resolved values are never stored in PostgreSQL.
 
@@ -80,6 +81,8 @@ Important responses are `202` accepted, `400` malformed input, `401` authenticat
 - HTTP `2xx` is delivered; `408`, `425`, `429`, and `5xx` are retryable; other `4xx` responses are permanent.
 - Network and timeout failures are retryable.
 - Retry delays, maximum attempts, lifetime, timeout, and concurrency limit come from the immutable destination snapshot.
+- Configured retry delays receive bounded random jitter of ±20%; an explicit supplier `Retry-After` value is honored without jitter.
+- `concurrency_limit` caps simultaneous supplier calls for one destination within one worker process. Multiple worker replicas each enforce their own limit; it is not a distributed global quota.
 - Due retries and expired leases create a new logical Outbox generation atomically.
 - Exhausted and permanent failures become `dead`; replay is an explicit authenticated operation.
 - Terminal records are retained for 30 days by the retention worker.
@@ -89,6 +92,10 @@ Important responses are `202` accepted, `400` malformed input, `401` authenticat
 Requests are capped at 256 KiB. Destinations are pre-registered, production URLs require HTTPS, redirects are constrained, and resolved IPs are checked against unsafe network ranges to reduce SSRF and DNS-rebinding risk. Logs and query responses omit payloads, authorization values, secrets, and full supplier response bodies.
 
 Bearer tokens are intentionally simple for this assignment. Production evolution should use a secret manager and workload identity, rate limits at the edge, encrypted connections to PostgreSQL/RabbitMQ, structured audit export, and destination-level circuit breaking. Generic exactly-once delivery remains out of scope.
+
+## Observability
+
+API and `all` expose `/livez`, `/readyz`, and `/metrics` on `HTTP_ADDR`. Split publisher, worker, and scheduler processes expose the same operational endpoints on `METRICS_ADDR` inside their containers. Implemented counters cover intake outcomes, Outbox publish confirmations/failures, committed delivery outcomes, dead transitions, retry generations, and recovered delivery leases. Identifiers, URLs, payloads, and credentials are never metric labels.
 
 ## Verification
 
@@ -105,6 +112,8 @@ docker build -f deployments/Dockerfile .
 ```
 
 Integration tests require reachable PostgreSQL and RabbitMQ instances. Unit tests using `httptest` also require permission to bind loopback ports; highly restricted sandboxes may reject that operation even when the code is correct.
+
+The integration suite includes a successful API-to-supplier path plus real PostgreSQL/RabbitMQ recovery cases for `503` retry scheduling, duplicate broker delivery, and expired worker leases. Component tests separately cover HTTP timeout, redirects, response truncation, `Retry-After`, publisher-confirm loss, stale CAS ownership, and authentication boundaries.
 
 ## Repository layout
 

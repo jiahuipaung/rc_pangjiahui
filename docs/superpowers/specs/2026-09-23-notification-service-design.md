@@ -175,7 +175,7 @@ A destination declaration contains:
 - secret header names mapped to environment-variable references;
 - request timeout;
 - maximum attempts and task lifetime;
-- optional per-destination concurrency limit.
+- per-destination concurrency limit enforced independently by each worker process.
 
 Startup validation rejects duplicate identifiers, unsupported methods, malformed URLs, missing secret environment variables, invalid retry bounds, and unsafe network targets. A request stores a snapshot of the destination identifier, method, URL, non-secret headers, secret references, timeout, and retry policy. Secret values themselves are resolved at delivery time and never stored in PostgreSQL.
 
@@ -240,7 +240,7 @@ Defaults:
 - one HTTP attempt timeout: 5 seconds;
 - maximum attempts: 8;
 - retry delays: 5 seconds, 30 seconds, 2 minutes, 10 minutes, 30 minutes, 2 hours, and 8 hours;
-- bounded random jitter on every computed delay;
+- bounded random jitter of plus or minus 20 percent on configured delays; explicit supplier `Retry-After` values are not jittered;
 - maximum task lifetime: 24 hours.
 
 Result classification:
@@ -297,19 +297,17 @@ An ORM, dependency-injection framework, and dynamic configuration service are in
 
 Structured logs use stable error codes and include `notification_id`, `destination_id`, `caller_id`, attempt number, event identifier, elapsed time, and a short lease-token fingerprint. Logs never include request bodies, authorization values, secret headers, complete URLs with query strings, or complete supplier response bodies.
 
-Metrics cover:
+Implemented metrics cover:
 
-- accepted and rejected requests and API latency;
-- tasks by state;
-- unpublished Outbox count and oldest event age;
-- publish confirms, failures, and claim recoveries;
-- delivery attempts, latency, and classified outcomes;
-- retry scheduling, dead tasks, and expired lease recovery;
-- RabbitMQ redeliveries.
+- intake outcomes;
+- Outbox publish confirmations and failures;
+- committed delivery outcomes and dead transitions;
+- retry generations scheduled;
+- expired delivery leases recovered.
 
 High-cardinality identifiers are not metric labels. Destination identifiers may be labels only when their configured count is operationally bounded.
 
-`/livez` reports process liveness. `/readyz` checks only dependencies required by the selected role: PostgreSQL for all roles, RabbitMQ for publishers/workers, and validated destination configuration for APIs/workers. `/metrics` is exposed separately and should be protected at the network layer.
+`/livez` reports process liveness. `/readyz` checks only dependencies required by the selected role: PostgreSQL for all roles, RabbitMQ for publishers/workers, and validated destination configuration for APIs/workers. API and `all` expose these endpoints and `/metrics` on their main HTTP server. Split publisher, worker, and scheduler roles expose an internal observability server on `METRICS_ADDR`; it should be protected at the network layer.
 
 Thirty-day retention is enforced by a bounded cleanup job that removes terminal tasks and their published Outbox rows in small batches. Active, retryable, or unpublished records are never deleted by retention cleanup.
 
@@ -319,8 +317,8 @@ Thirty-day retention is enforced by a bounded cleanup job that removes terminal 
 - HTTP handler tests cover authentication, ownership, malformed JSON, unknown fields, size limits, idempotent replay, idempotency conflict, and response codes.
 - Delivery tests use `httptest.Server` for success, permanent failure, retryable failure, timeout, redirect, truncated response, and `Retry-After` cases.
 - PostgreSQL integration tests verify unique constraints, Outbox atomicity, `SKIP LOCKED` claim separation, compare-and-swap ownership, expired lease recovery, and concurrent scheduler behavior.
-- RabbitMQ integration tests verify persistent publishing, Publisher Confirms, manual acknowledgements, duplicate messages, reconnect behavior, and redelivery after consumer interruption.
-- An end-to-end test submits an API request and waits for a controlled supplier server to observe delivery.
+- RabbitMQ component integration tests verify persistent publishing, Publisher Confirms, and manual acknowledgements.
+- End-to-end integration tests cover successful API-to-supplier delivery, `503` retry through the scheduler, duplicate broker delivery, and expired worker-lease recovery against real PostgreSQL and RabbitMQ.
 - CI runs formatting checks, `go vet ./...`, the selected static analyzer, unit/integration tests, and `go test -race ./...` where compatible with the test grouping.
 
 Time, identifier generation, jitter, HTTP transport, repositories, and message adapters are controllable in tests. Tests use eventual assertions with explicit deadlines rather than arbitrary long sleeps.
@@ -341,7 +339,7 @@ Time, identifier generation, jitter, HTTP transport, repositories, and message a
 
 ### 16.1 Higher Throughput
 
-Scale publisher and worker roles independently, add destination-level concurrency controls, partition or archive task tables, and tune batch claiming. If sustained throughput reaches a level where RabbitMQ or PostgreSQL becomes the measured bottleneck, evaluate broker sharding or Kafka based on observed traffic and ordering requirements.
+Scale publisher and worker roles independently, add a distributed destination quota only when deployment-wide limits are required, partition or archive task tables, and tune batch claiming. The MVP concurrency limit is process-local, so aggregate concurrency grows with worker replicas. If sustained throughput reaches a level where RabbitMQ or PostgreSQL becomes the measured bottleneck, evaluate broker sharding or Kafka based on observed traffic and ordering requirements.
 
 ### 16.2 Destination Governance
 
@@ -391,4 +389,3 @@ The MVP is complete when:
 8. Worker and publisher crashes recover through leases without leaving tasks permanently stuck.
 9. Logs, API responses, and persisted records do not expose supplier secret values.
 10. Unit, integration, end-to-end, race, vet, and static-analysis checks pass in the documented development workflow.
-
