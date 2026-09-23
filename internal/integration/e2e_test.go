@@ -107,7 +107,7 @@ func TestEndToEndDurableNotificationDelivery(t *testing.T) {
 	if count, err := publisher.RunOnce(ctx); err != nil || count != 1 {
 		t.Fatalf("publish=%d,%v", count, err)
 	}
-	deliveryService := delivery.NewService(store, delivery.NewHTTPSender(delivery.SenderConfig{AllowPrivateNetworks: true, MaxDiagnosticBytes: 1024}, os.LookupEnv), now, newID, time.Minute)
+	deliveryService := delivery.NewService(store, delivery.NewHTTPSender(delivery.SenderConfig{AllowPrivateNetworks: true, MaxDiagnosticBytes: 1024}, os.LookupEnv), delivery.NewLimiter(), now, newID, time.Minute)
 	select {
 	case message := <-deliveries:
 		if disposition := deliveryService.Handle(ctx, delivery.Message{EventID: message.Message.EventID, NotificationID: message.Message.NotificationID}); disposition != delivery.Ack {

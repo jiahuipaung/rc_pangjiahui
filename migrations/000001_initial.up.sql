@@ -13,6 +13,7 @@ CREATE TABLE notification_tasks (
     max_attempts        INTEGER NOT NULL CHECK (max_attempts BETWEEN 1 AND 32),
     lifetime_ns         BIGINT NOT NULL CHECK (lifetime_ns > 0),
     retry_delays_ns     JSONB NOT NULL,
+    concurrency_limit   INTEGER NOT NULL CHECK (concurrency_limit > 0),
     status              TEXT NOT NULL CHECK (status IN ('pending','delivering','retry_wait','delivered','dead')),
     attempt_count       INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     generation          INTEGER NOT NULL DEFAULT 0 CHECK (generation >= 0),

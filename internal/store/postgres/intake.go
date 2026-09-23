@@ -47,12 +47,12 @@ func (tx transaction) CreateNotification(ctx context.Context, task notification.
 INSERT INTO notification_tasks (
  id, caller_id, idempotency_key, request_hash, destination_id, method, url,
  static_headers, secret_headers, body, timeout_ns, max_attempts, lifetime_ns,
- retry_delays_ns, status, attempt_count, generation, created_at, updated_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+ retry_delays_ns, concurrency_limit, status, attempt_count, generation, created_at, updated_at
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
 		task.ID, task.CallerID, task.IdempotencyKey, task.RequestHash[:], task.Snapshot.DestinationID,
 		task.Snapshot.Method, task.Snapshot.URL, staticHeaders, secretHeaders, task.Snapshot.Body,
 		int64(task.Snapshot.Timeout), task.Snapshot.Retry.MaxAttempts, int64(task.Snapshot.Retry.Lifetime),
-		retryDelays, task.Status, task.AttemptCount, task.Generation, task.CreatedAt, task.UpdatedAt)
+		retryDelays, task.Snapshot.ConcurrencyLimit, task.Status, task.AttemptCount, task.Generation, task.CreatedAt, task.UpdatedAt)
 	if err == nil {
 		return nil
 	}

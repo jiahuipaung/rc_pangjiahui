@@ -51,6 +51,7 @@ func fixtureTask(id, key string) notification.Task {
 			StaticHeaders: map[string][]string{"Content-Type": {"application/json"}},
 			SecretHeaders: map[string]string{"Authorization": "CRM_TOKEN"}, Body: json.RawMessage(`{"order_id":"1"}`),
 			Timeout: 5 * time.Second, Retry: notification.RetryPolicy{MaxAttempts: 3, Lifetime: time.Hour, Delays: []time.Duration{time.Second}},
+			ConcurrencyLimit: 2,
 		},
 		Status: notification.StatusPending, CreatedAt: now, UpdatedAt: now,
 	}
@@ -168,6 +169,9 @@ func TestDeliveryResultRejectsStaleLease(t *testing.T) {
 	claim, err := store.ClaimDelivery(t.Context(), "n-1", "current-token", time.Now().Add(time.Minute))
 	if err != nil || !claim.Acquired {
 		t.Fatalf("claim = %+v, %v", claim, err)
+	}
+	if claim.Task.Snapshot.ConcurrencyLimit != 2 {
+		t.Fatalf("concurrency limit = %d, want 2", claim.Task.Snapshot.ConcurrencyLimit)
 	}
 	applied, err := store.ApplyDeliveryResult(t.Context(), "n-1", "old-token", notification.AttemptResult{Outcome: notification.Delivered, CompletedAt: time.Now()})
 	if err != nil {

@@ -95,7 +95,7 @@ func RunConfigured(ctx context.Context, cfg config.Runtime) error {
 	}
 	if cfg.Role == config.RoleWorker || cfg.Role == config.RoleAll {
 		sender := delivery.NewHTTPSender(delivery.SenderConfig{MaxDiagnosticBytes: 1024}, os.LookupEnv)
-		worker := delivery.NewService(store, sender, now, newID, time.Minute)
+		worker := delivery.NewService(store, sender, delivery.NewLimiter(), now, newID, time.Minute)
 		deliveries, consumeErr := workerRabbit.Consume(ctx, "notifier-worker")
 		if consumeErr != nil {
 			return consumeErr

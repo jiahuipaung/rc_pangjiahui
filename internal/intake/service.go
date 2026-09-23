@@ -50,7 +50,7 @@ func (service *Service) Create(ctx context.Context, caller, idempotencyKey, dest
 		Snapshot: notification.DeliverySnapshot{
 			DestinationID: destinationID, Method: target.Method, URL: target.URL.String(), StaticHeaders: target.StaticHeaders.Clone(),
 			SecretHeaders: cloneMap(target.SecretHeaders), Body: append(json.RawMessage(nil), payload...), Timeout: target.Timeout,
-			Retry: target.Retry, IdempotencyKey: idempotencyKey,
+			Retry: target.Retry, ConcurrencyLimit: target.ConcurrencyLimit, IdempotencyKey: idempotencyKey,
 		},
 		Status: notification.StatusPending, CreatedAt: now, UpdatedAt: now,
 	}

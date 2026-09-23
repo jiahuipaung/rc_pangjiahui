@@ -36,7 +36,7 @@ func (sender *fakeSender) Send(context.Context, notification.DeliverySnapshot) R
 }
 
 func worker(repo *fakeRepository, sender *fakeSender) *Service {
-	return NewService(repo, sender, func() time.Time { return time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC) }, func() string { return "lease-1" }, time.Minute)
+	return NewService(repo, sender, NewLimiter(), func() time.Time { return time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC) }, func() string { return "lease-1" }, time.Minute)
 }
 
 func TestHandleDoesNotSendWhenClaimNotAcquired(t *testing.T) {
@@ -56,7 +56,7 @@ func TestHandleRequeuesDatabaseFailures(t *testing.T) {
 }
 
 func TestHandleAppliesDeliveryResultAndAcknowledges(t *testing.T) {
-	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{}, Status: notification.StatusDelivering}
+	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{DestinationID: "crm", ConcurrencyLimit: 1}, Status: notification.StatusDelivering}
 	repo := &fakeRepository{claim: notification.Claim{Task: task, Acquired: true}, applyResult: true}
 	sender := &fakeSender{result: Result{Outcome: notification.Delivered, HTTPStatus: 204}}
 	if got := worker(repo, sender).Handle(t.Context(), Message{NotificationID: "n-1"}); got != Ack {
@@ -68,9 +68,30 @@ func TestHandleAppliesDeliveryResultAndAcknowledges(t *testing.T) {
 }
 
 func TestHandleRequeuesWhenResultCannotCommit(t *testing.T) {
-	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{}, Status: notification.StatusDelivering}
+	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{DestinationID: "crm", ConcurrencyLimit: 1}, Status: notification.StatusDelivering}
 	repo := &fakeRepository{claim: notification.Claim{Task: task, Acquired: true}, applyErr: errors.New("commit failed")}
 	if got := worker(repo, &fakeSender{}).Handle(t.Context(), Message{NotificationID: "n-1"}); got != Requeue {
 		t.Fatalf("disposition = %v", got)
+	}
+}
+
+func TestHandleDoesNotCallSupplierWithoutDestinationCapacity(t *testing.T) {
+	limiter := NewLimiter()
+	release, err := limiter.Acquire(t.Context(), "crm", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{DestinationID: "crm", ConcurrencyLimit: 1}, Status: notification.StatusDelivering}
+	repo := &fakeRepository{claim: notification.Claim{Task: task, Acquired: true}, applyResult: true}
+	sender := &fakeSender{result: Result{Outcome: notification.Delivered, HTTPStatus: 204}}
+	service := NewService(repo, sender, limiter, time.Now, func() string { return "lease-1" }, time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if got := service.Handle(ctx, Message{NotificationID: "n-1"}); got != Requeue {
+		t.Fatalf("disposition = %v, want Requeue", got)
+	}
+	if sender.calls != 0 {
+		t.Fatalf("supplier calls = %d, want 0", sender.calls)
 	}
 }

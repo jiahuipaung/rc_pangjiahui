@@ -16,13 +16,13 @@ func (store *Store) ClaimDelivery(ctx context.Context, id, leaseToken string, le
 SET status='delivering',lease_token=$2,lease_until=$3,attempt_count=attempt_count+1,updated_at=now()
 WHERE id=$1 AND status='pending'
 RETURNING id,caller_id,idempotency_key,status,attempt_count,generation,created_at,updated_at,
-destination_id,method,url,static_headers,secret_headers,body,timeout_ns,max_attempts,lifetime_ns,retry_delays_ns`, id, leaseToken, leaseUntil)
+destination_id,method,url,static_headers,secret_headers,body,timeout_ns,max_attempts,lifetime_ns,retry_delays_ns,concurrency_limit`, id, leaseToken, leaseUntil)
 	var task notification.Task
 	var staticHeaders, secretHeaders, retryDelays []byte
 	var timeoutNS, lifetimeNS int64
 	err := row.Scan(&task.ID, &task.CallerID, &task.IdempotencyKey, &task.Status, &task.AttemptCount, &task.Generation, &task.CreatedAt, &task.UpdatedAt,
 		&task.Snapshot.DestinationID, &task.Snapshot.Method, &task.Snapshot.URL, &staticHeaders, &secretHeaders, &task.Snapshot.Body,
-		&timeoutNS, &task.Snapshot.Retry.MaxAttempts, &lifetimeNS, &retryDelays)
+		&timeoutNS, &task.Snapshot.Retry.MaxAttempts, &lifetimeNS, &retryDelays, &task.Snapshot.ConcurrencyLimit)
 	if err == pgx.ErrNoRows {
 		return notification.Claim{}, nil
 	}

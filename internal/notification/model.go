@@ -31,15 +31,16 @@ type RetryPolicy struct {
 }
 
 type DeliverySnapshot struct {
-	DestinationID  string
-	Method         string
-	URL            string
-	StaticHeaders  http.Header
-	SecretHeaders  map[string]string
-	Body           json.RawMessage
-	Timeout        time.Duration
-	Retry          RetryPolicy
-	IdempotencyKey string
+	DestinationID    string
+	Method           string
+	URL              string
+	StaticHeaders    http.Header
+	SecretHeaders    map[string]string
+	Body             json.RawMessage
+	Timeout          time.Duration
+	Retry            RetryPolicy
+	ConcurrencyLimit int
+	IdempotencyKey   string
 }
 
 type Task struct {

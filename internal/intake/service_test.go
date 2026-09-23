@@ -78,6 +78,9 @@ func TestCreateBuildsTaskAndInitialOutboxAtomically(t *testing.T) {
 	if string(repo.created.Snapshot.Body) != `{"order_id":"1"}` {
 		t.Fatalf("body = %s", repo.created.Snapshot.Body)
 	}
+	if repo.created.Snapshot.ConcurrencyLimit != 2 {
+		t.Fatalf("concurrency limit = %d, want 2", repo.created.Snapshot.ConcurrencyLimit)
+	}
 }
 
 func TestCreateRejectsUnknownDestination(t *testing.T) {
