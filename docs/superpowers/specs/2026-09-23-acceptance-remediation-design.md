@@ -30,7 +30,7 @@ Existing migrations may be edited because the repository has not published a sta
 
 A worker-owned limiter maps `destination_id` to a buffered token channel. Delivery acquires a token before supplier network I/O and releases it with `defer`. Waiting for capacity observes the delivery context; cancellation does not leak a token or perform the HTTP call.
 
-The limiter is injected behind a small interface so delivery tests can prove ordering and cancellation without sleeping. The default implementation lazily creates semaphores and rejects inconsistent limits for the same destination as a configuration/programming error.
+The limiter is injected behind a small interface so delivery tests can prove ordering and cancellation without sleeping. The default implementation lazily creates destination state. If old and new immutable snapshots carry different limits after a configuration change, the process conservatively uses the smallest limit it has observed until restart; it never rejects and redelivers work merely because snapshot versions differ.
 
 ## 4. Retry Jitter
 
@@ -49,7 +49,7 @@ The MVP will expose and update only metrics backed by real events:
 - expired delivery leases recovered;
 - Outbox publish confirmations and failures.
 
-Application services receive narrow observer interfaces with no-op defaults, keeping tests and domain logic independent of Prometheus. The runtime constructs one metrics registry per process and injects observers into roles present in that process.
+Application services receive narrow observer interfaces with no-op defaults, keeping tests and domain logic independent of Prometheus. The runtime constructs one metrics registry per process and injects observers into roles present in that process. API and `all` expose it on their existing HTTP server; split publisher, worker, and scheduler roles expose an internal observability server configured by `METRICS_ADDR`.
 
 The architecture document will remove claims for API latency, tasks-by-state gauges, Outbox age/count gauges, and RabbitMQ redelivery counters until those measurements are implemented. High-cardinality task and caller identifiers remain forbidden as labels.
 
