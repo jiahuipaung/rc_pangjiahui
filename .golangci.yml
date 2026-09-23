@@ -7,4 +7,3 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-

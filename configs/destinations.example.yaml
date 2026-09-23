@@ -11,4 +11,3 @@ destinations:
     lifetime: 24h
     retry_delays: [5s, 30s, 2m, 10m, 30m, 2h, 8h]
     concurrency_limit: 10
-
