@@ -80,7 +80,7 @@ func (client *Client) Publish(ctx context.Context, message outbox.Message) error
 }
 
 func (client *Client) Close() error {
-	channelErr := client.channel.Close()
 	connectionErr := client.connection.Close()
+	channelErr := client.channel.Close()
 	return errors.Join(channelErr, connectionErr)
 }
