@@ -50,7 +50,7 @@ services:
       target: migration
     environment:
       PGPASSWORD: notifier
-    command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "notifier", "-d", "notifier", "-f", "/migrations/000001_initial.up.sql"]
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-h", "postgres", "-U", "notifier", "-d", "notifier", "-f", "/migrations/000001_initial.up.sql", "-f", "/migrations/000002_concurrency_limit.up.sql"]
     depends_on:
       postgres:
         condition: service_healthy

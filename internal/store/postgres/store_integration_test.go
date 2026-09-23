@@ -29,17 +29,69 @@ func newStore(t *testing.T) *Store {
 	}
 	t.Cleanup(pool.Close)
 	_, file, _, _ := runtime.Caller(0)
-	migration, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", "000001_initial.up.sql"))
+	migrationsDir := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations")
+	if _, err = pool.Exec(t.Context(), "DROP TABLE IF EXISTS outbox_events; DROP TABLE IF EXISTS notification_tasks;"); err != nil {
+		t.Fatalf("reset schema: %v", err)
+	}
+	for _, name := range []string{"000001_initial.up.sql", "000002_concurrency_limit.up.sql"} {
+		migration, readErr := os.ReadFile(filepath.Join(migrationsDir, name))
+		if readErr != nil {
+			t.Fatalf("read migration %s: %v", name, readErr)
+		}
+		if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
+			t.Fatalf("apply migration %s: %v", name, err)
+		}
+	}
+	return New(pool)
+}
+
+func TestConcurrencyLimitMigrationUpgradesExistingSchema(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is required")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
-		t.Fatalf("read migration: %v", err)
+		t.Fatalf("connect postgres: %v", err)
+	}
+	defer pool.Close()
+	_, file, _, _ := runtime.Caller(0)
+	migrationsDir := filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations")
+	initial, err := os.ReadFile(filepath.Join(migrationsDir, "000001_initial.up.sql"))
+	if err != nil {
+		t.Fatalf("read initial migration: %v", err)
+	}
+	upgrade, err := os.ReadFile(filepath.Join(migrationsDir, "000002_concurrency_limit.up.sql"))
+	if err != nil {
+		t.Fatalf("read upgrade migration: %v", err)
 	}
 	if _, err = pool.Exec(t.Context(), "DROP TABLE IF EXISTS outbox_events; DROP TABLE IF EXISTS notification_tasks;"); err != nil {
 		t.Fatalf("reset schema: %v", err)
 	}
-	if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
-		t.Fatalf("apply migration: %v", err)
+	if _, err = pool.Exec(t.Context(), string(initial)); err != nil {
+		t.Fatalf("apply initial migration: %v", err)
 	}
-	return New(pool)
+	if _, err = pool.Exec(t.Context(), `INSERT INTO notification_tasks
+(id,caller_id,idempotency_key,request_hash,destination_id,method,url,body,timeout_ns,max_attempts,lifetime_ns,retry_delays_ns,status,created_at,updated_at)
+VALUES ('legacy','orders','legacy-key',decode(repeat('01',32),'hex'),'crm','POST','https://198.51.100.10/hook','{}',1000000000,3,3600000000000,'[1000000000]','pending',now(),now())`); err != nil {
+		t.Fatalf("insert legacy task: %v", err)
+	}
+	if _, err = pool.Exec(t.Context(), string(upgrade)); err != nil {
+		t.Fatalf("apply concurrency migration: %v", err)
+	}
+	if _, err = pool.Exec(t.Context(), string(initial)); err != nil {
+		t.Fatalf("reapply initial migration: %v", err)
+	}
+	if _, err = pool.Exec(t.Context(), string(upgrade)); err != nil {
+		t.Fatalf("reapply concurrency migration: %v", err)
+	}
+	var limit int
+	if err = pool.QueryRow(t.Context(), "SELECT concurrency_limit FROM notification_tasks WHERE id='legacy'").Scan(&limit); err != nil {
+		t.Fatalf("read upgraded task: %v", err)
+	}
+	if limit != 1 {
+		t.Fatalf("legacy concurrency limit = %d, want safe default 1", limit)
+	}
 }
 
 func fixtureTask(id, key string) notification.Task {

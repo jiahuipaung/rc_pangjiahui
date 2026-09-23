@@ -48,15 +48,18 @@ func newDatabase(t *testing.T) (*postgres.Store, *pgxpool.Pool) {
 	}
 	t.Cleanup(pool.Close)
 	_, file, _, _ := runtime.Caller(0)
-	migration, err := os.ReadFile(filepath.Join(filepath.Dir(file), "..", "..", "migrations", "000001_initial.up.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	migrationsDir := filepath.Join(filepath.Dir(file), "..", "..", "migrations")
 	if _, err = pool.Exec(t.Context(), "DROP TABLE IF EXISTS outbox_events; DROP TABLE IF EXISTS notification_tasks;"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"000001_initial.up.sql", "000002_concurrency_limit.up.sql"} {
+		migration, readErr := os.ReadFile(filepath.Join(migrationsDir, name))
+		if readErr != nil {
+			t.Fatalf("read migration %s: %v", name, readErr)
+		}
+		if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
+			t.Fatalf("apply migration %s: %v", name, err)
+		}
 	}
 	return postgres.New(pool), pool
 }
