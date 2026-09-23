@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,15 +15,33 @@ func (store *Store) ClaimDelivery(ctx context.Context, id, leaseToken string, le
 	row := store.pool.QueryRow(ctx, `UPDATE notification_tasks
 SET status='delivering',lease_token=$2,lease_until=$3,attempt_count=attempt_count+1,updated_at=now()
 WHERE id=$1 AND status='pending'
-RETURNING id,caller_id,idempotency_key,status,attempt_count,generation,created_at,updated_at`, id, leaseToken, leaseUntil)
+RETURNING id,caller_id,idempotency_key,status,attempt_count,generation,created_at,updated_at,
+destination_id,method,url,static_headers,secret_headers,body,timeout_ns,max_attempts,lifetime_ns,retry_delays_ns`, id, leaseToken, leaseUntil)
 	var task notification.Task
-	err := row.Scan(&task.ID, &task.CallerID, &task.IdempotencyKey, &task.Status, &task.AttemptCount, &task.Generation, &task.CreatedAt, &task.UpdatedAt)
+	var staticHeaders, secretHeaders, retryDelays []byte
+	var timeoutNS, lifetimeNS int64
+	err := row.Scan(&task.ID, &task.CallerID, &task.IdempotencyKey, &task.Status, &task.AttemptCount, &task.Generation, &task.CreatedAt, &task.UpdatedAt,
+		&task.Snapshot.DestinationID, &task.Snapshot.Method, &task.Snapshot.URL, &staticHeaders, &secretHeaders, &task.Snapshot.Body,
+		&timeoutNS, &task.Snapshot.Retry.MaxAttempts, &lifetimeNS, &retryDelays)
 	if err == pgx.ErrNoRows {
 		return notification.Claim{}, nil
 	}
 	if err != nil {
 		return notification.Claim{}, fmt.Errorf("claim delivery: %w", err)
 	}
+	task.Snapshot.StaticHeaders = make(http.Header)
+	if err := json.Unmarshal(staticHeaders, &task.Snapshot.StaticHeaders); err != nil {
+		return notification.Claim{}, fmt.Errorf("decode static headers: %w", err)
+	}
+	if err := json.Unmarshal(secretHeaders, &task.Snapshot.SecretHeaders); err != nil {
+		return notification.Claim{}, fmt.Errorf("decode secret headers: %w", err)
+	}
+	if err := json.Unmarshal(retryDelays, &task.Snapshot.Retry.Delays); err != nil {
+		return notification.Claim{}, fmt.Errorf("decode retry delays: %w", err)
+	}
+	task.Snapshot.Timeout = time.Duration(timeoutNS)
+	task.Snapshot.Retry.Lifetime = time.Duration(lifetimeNS)
+	task.Snapshot.IdempotencyKey = task.IdempotencyKey
 	task.LeaseToken = leaseToken
 	task.LeaseUntil = &leaseUntil
 	return notification.Claim{Task: task, Acquired: true}, nil
