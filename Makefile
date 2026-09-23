@@ -16,11 +16,10 @@ lint:
 	golangci-lint run
 
 integration:
-	go test -tags=integration ./internal/integration/...
+	go test -tags=integration -race -timeout=90s ./...
 
 up:
 	docker compose -f deployments/compose.yaml up -d postgres rabbitmq
 
 down:
 	docker compose -f deployments/compose.yaml down -v
-
