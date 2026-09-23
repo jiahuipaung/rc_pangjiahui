@@ -177,3 +177,29 @@ func TestDeliveryResultRejectsStaleLease(t *testing.T) {
 		t.Fatal("stale lease unexpectedly changed task")
 	}
 }
+
+func TestScheduleDueRecoversExpiredLeaseOnce(t *testing.T) {
+	store := newStore(t)
+	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), fixtureTask("n-1", "key-1")) }); err != nil { t.Fatalf("seed: %v", err) }
+	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil { t.Fatalf("claim: %v", err) }
+	result, err := store.ScheduleDue(t.Context(), time.Now(), 10)
+	if err != nil { t.Fatalf("ScheduleDue: %v", err) }
+	if result.Scheduled != 1 || result.RecoveredLeases != 1 { t.Fatalf("result = %+v", result) }
+	second, err := store.ScheduleDue(t.Context(), time.Now(), 10)
+	if err != nil { t.Fatalf("second ScheduleDue: %v", err) }
+	if second.Scheduled != 0 { t.Fatalf("second result = %+v", second) }
+	var events int
+	if err := store.pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox_events WHERE aggregate_id='n-1'").Scan(&events); err != nil { t.Fatal(err) }
+	if events != 1 { t.Fatalf("outbox events = %d, want 1", events) }
+}
+
+func TestScheduleDueMovesExhaustedTaskToDead(t *testing.T) {
+	store := newStore(t)
+	task := fixtureTask("n-1", "key-1")
+	task.Snapshot.Retry.MaxAttempts = 1
+	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), task) }); err != nil { t.Fatalf("seed: %v", err) }
+	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil { t.Fatalf("claim: %v", err) }
+	result, err := store.ScheduleDue(t.Context(), time.Now(), 10)
+	if err != nil { t.Fatalf("ScheduleDue: %v", err) }
+	if result.Dead != 1 || result.Scheduled != 0 { t.Fatalf("result = %+v", result) }
+}

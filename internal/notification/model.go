@@ -89,3 +89,9 @@ type Claim struct {
 	Task     Task
 	Acquired bool
 }
+
+type ScheduleResult struct {
+	Scheduled       int
+	Dead            int
+	RecoveredLeases int
+}
