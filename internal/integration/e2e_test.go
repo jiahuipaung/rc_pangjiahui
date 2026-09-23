@@ -40,7 +40,7 @@ type identityJitter struct{}
 
 func (identityJitter) Apply(delay time.Duration) time.Duration { return delay }
 
-func newDatabase(t *testing.T) *postgres.Store {
+func newDatabase(t *testing.T) (*postgres.Store, *pgxpool.Pool) {
 	t.Helper()
 	pool, err := pgxpool.New(t.Context(), integrationEnv(t, "TEST_DATABASE_URL"))
 	if err != nil {
@@ -58,7 +58,7 @@ func newDatabase(t *testing.T) *postgres.Store {
 	if _, err = pool.Exec(t.Context(), string(migration)); err != nil {
 		t.Fatal(err)
 	}
-	return postgres.New(pool)
+	return postgres.New(pool), pool
 }
 
 func TestEndToEndDurableNotificationDelivery(t *testing.T) {
@@ -71,7 +71,7 @@ func TestEndToEndDurableNotificationDelivery(t *testing.T) {
 		writer.WriteHeader(http.StatusNoContent)
 	}))
 	defer supplier.Close()
-	store := newDatabase(t)
+	store, _ := newDatabase(t)
 	registry, err := destination.NewRegistry([]destination.Destination{{
 		ID: "supplier", Method: http.MethodPost, URL: mustURL(t, supplier.URL), StaticHeaders: http.Header{"Content-Type": {"application/json"}},
 		Timeout: time.Second, Retry: notification.RetryPolicy{MaxAttempts: 3, Lifetime: time.Hour, Delays: []time.Duration{time.Second}}, ConcurrencyLimit: 1,
