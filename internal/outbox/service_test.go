@@ -30,6 +30,12 @@ type fakePublisher struct {
 	messages []Message
 }
 
+type fakeOutboxObserver struct{ outcomes []string }
+
+func (observer *fakeOutboxObserver) ObserveOutboxPublish(outcome string) {
+	observer.outcomes = append(observer.outcomes, outcome)
+}
+
 func (publisher *fakePublisher) Publish(_ context.Context, message Message) error {
 	publisher.messages = append(publisher.messages, message)
 	return publisher.err
@@ -39,9 +45,24 @@ func oneEvent() notification.OutboxEvent {
 	return notification.OutboxEvent{ID: "event-1", AggregateID: "notification-1", EventType: "notification.ready", Payload: json.RawMessage(`{"notification_id":"notification-1"}`)}
 }
 
-func newService(repo *fakeRepository, publisher *fakePublisher) *Service {
+func newService(repo *fakeRepository, publisher *fakePublisher, observers ...Observer) *Service {
 	now := func() time.Time { return time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC) }
-	return NewService(repo, publisher, now, func() string { return "claim-1" }, Config{BatchSize: 10, ClaimTTL: time.Minute})
+	return NewService(repo, publisher, now, func() string { return "claim-1" }, Config{BatchSize: 10, ClaimTTL: time.Minute}, observers...)
+}
+
+func TestRunOnceObservesConfirmAndFailure(t *testing.T) {
+	observer := &fakeOutboxObserver{}
+	successRepo := &fakeRepository{events: []notification.OutboxEvent{oneEvent()}, markApplied: true}
+	if _, err := newService(successRepo, &fakePublisher{}, observer).RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	failureRepo := &fakeRepository{events: []notification.OutboxEvent{oneEvent()}, markApplied: true}
+	if _, err := newService(failureRepo, &fakePublisher{err: ErrConfirmLost}, observer).RunOnce(t.Context()); !errors.Is(err, ErrConfirmLost) {
+		t.Fatalf("error = %v", err)
+	}
+	if len(observer.outcomes) != 2 || observer.outcomes[0] != "confirmed" || observer.outcomes[1] != "failed" {
+		t.Fatalf("outcomes = %v", observer.outcomes)
+	}
 }
 
 func TestRunOnceDoesNotMarkPublishedWhenConfirmFails(t *testing.T) {

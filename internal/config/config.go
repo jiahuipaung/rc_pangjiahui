@@ -32,6 +32,7 @@ type Runtime struct {
 	RabbitMQURL      string
 	DestinationsFile string
 	HTTPAddr         string
+	MetricsAddr      string
 	CallerTokens     map[string]string
 	AdminTokens      map[string]string
 	ShutdownTimeout  time.Duration
@@ -61,6 +62,11 @@ func LoadRuntime(role Role, lookup func(string) (string, bool)) (Runtime, error)
 		}
 		if config.HTTPAddr == "" {
 			config.HTTPAddr = ":8080"
+		}
+	} else {
+		config.MetricsAddr = get("METRICS_ADDR")
+		if config.MetricsAddr == "" {
+			config.MetricsAddr = ":9090"
 		}
 	}
 	return config, nil

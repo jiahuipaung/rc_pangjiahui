@@ -15,10 +15,27 @@ type fakeRepository struct {
 	limit  int
 }
 
+type fakeRetryObserver struct{ results []Result }
+
+func (observer *fakeRetryObserver) ObserveSchedule(result Result) {
+	observer.results = append(observer.results, result)
+}
+
 func (repo *fakeRepository) ScheduleDue(_ context.Context, now time.Time, limit int) (Result, error) {
 	repo.calls++
 	repo.now, repo.limit = now, limit
 	return repo.result, repo.err
+}
+
+func TestRunOnceObservesScheduledAndRecoveredCounts(t *testing.T) {
+	result := Result{Scheduled: 2, Dead: 1, RecoveredLeases: 1}
+	observer := &fakeRetryObserver{}
+	if _, err := NewService(&fakeRepository{result: result}, time.Now, Config{BatchSize: 10}, observer).RunOnce(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(observer.results) != 1 || observer.results[0] != result {
+		t.Fatalf("observed = %+v", observer.results)
+	}
 }
 
 func TestRunOnceSchedulesDueAndExpiredTasks(t *testing.T) {

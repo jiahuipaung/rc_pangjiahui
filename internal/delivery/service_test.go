@@ -34,9 +34,27 @@ type fixedDelayJitter time.Duration
 
 func (jitter fixedDelayJitter) Apply(time.Duration) time.Duration { return time.Duration(jitter) }
 
+type fakeDeliveryObserver struct{ outcomes []string }
+
+func (observer *fakeDeliveryObserver) ObserveDelivery(outcome string) {
+	observer.outcomes = append(observer.outcomes, outcome)
+}
+
 func (sender *fakeSender) Send(context.Context, notification.DeliverySnapshot) Result {
 	sender.calls++
 	return sender.result
+}
+
+func TestHandleObservesCommittedDeliveryOutcome(t *testing.T) {
+	observer := &fakeDeliveryObserver{}
+	task := notification.Task{ID: "n-1", Snapshot: notification.DeliverySnapshot{DestinationID: "crm", ConcurrencyLimit: 1}, Status: notification.StatusDelivering}
+	repo := &fakeRepository{claim: notification.Claim{Task: task, Acquired: true}, applyResult: true}
+	sender := &fakeSender{result: Result{Outcome: notification.Permanent, HTTPStatus: 422}}
+	service := NewService(repo, sender, NewLimiter(), fixedDelayJitter(time.Second), time.Now, func() string { return "lease-1" }, time.Minute, observer)
+	_ = service.Handle(t.Context(), Message{NotificationID: "n-1"})
+	if len(observer.outcomes) != 1 || observer.outcomes[0] != "dead" {
+		t.Fatalf("outcomes = %v", observer.outcomes)
+	}
 }
 
 func worker(repo *fakeRepository, sender *fakeSender) *Service {

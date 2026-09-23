@@ -25,6 +25,14 @@ type Publisher interface {
 	Publish(context.Context, Message) error
 }
 
+type Observer interface {
+	ObserveOutboxPublish(string)
+}
+
+type noopObserver struct{}
+
+func (noopObserver) ObserveOutboxPublish(string) {}
+
 type Config struct {
 	BatchSize    int
 	ClaimTTL     time.Duration
@@ -37,10 +45,15 @@ type Service struct {
 	now        func() time.Time
 	newToken   func() string
 	config     Config
+	observer   Observer
 }
 
-func NewService(repository Repository, publisher Publisher, now func() time.Time, newToken func() string, config Config) *Service {
-	return &Service{repository: repository, publisher: publisher, now: now, newToken: newToken, config: config}
+func NewService(repository Repository, publisher Publisher, now func() time.Time, newToken func() string, config Config, observers ...Observer) *Service {
+	observer := Observer(noopObserver{})
+	if len(observers) > 0 && observers[0] != nil {
+		observer = observers[0]
+	}
+	return &Service{repository: repository, publisher: publisher, now: now, newToken: newToken, config: config, observer: observer}
 }
 
 func (service *Service) RunOnce(ctx context.Context) (int, error) {
@@ -53,14 +66,17 @@ func (service *Service) RunOnce(ctx context.Context) (int, error) {
 	published := 0
 	for _, event := range events {
 		if err := service.publisher.Publish(ctx, Message{EventID: event.ID, NotificationID: event.AggregateID}); err != nil {
+			service.observer.ObserveOutboxPublish("failed")
 			return published, err
 		}
 		applied, err := service.repository.MarkPublished(ctx, event.ID, token, service.now())
 		if err != nil {
+			service.observer.ObserveOutboxPublish("failed")
 			return published, fmt.Errorf("mark published: %w", err)
 		}
 		if applied {
 			published++
+			service.observer.ObserveOutboxPublish("confirmed")
 		}
 	}
 	return published, nil

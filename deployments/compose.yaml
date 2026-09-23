@@ -9,6 +9,7 @@ x-app: &app
     DATABASE_URL: postgres://notifier:notifier@postgres:5432/notifier?sslmode=disable
     RABBITMQ_URL: amqp://notifier:notifier@rabbitmq:5672/
     DESTINATIONS_FILE: /etc/notifier/destinations.yaml
+    METRICS_ADDR: :9090
     INVENTORY_API_TOKEN: development-placeholder
   depends_on:
     migrate:

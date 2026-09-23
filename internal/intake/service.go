@@ -24,24 +24,41 @@ type Registry interface {
 	Get(string) (destination.Destination, bool)
 }
 
+type Observer interface {
+	ObserveIntake(string)
+}
+
+type noopObserver struct{}
+
+func (noopObserver) ObserveIntake(string) {}
+
 type Service struct {
 	repository Repository
 	registry   Registry
 	now        func() time.Time
 	newID      func() string
+	observer   Observer
 }
 
-func New(repository Repository, registry Registry, now func() time.Time, newID func() string) *Service {
-	return &Service{repository: repository, registry: registry, now: now, newID: newID}
+func New(repository Repository, registry Registry, now func() time.Time, newID func() string, observers ...Observer) *Service {
+	observer := Observer(noopObserver{})
+	if len(observers) > 0 && observers[0] != nil {
+		observer = observers[0]
+	}
+	return &Service{repository: repository, registry: registry, now: now, newID: newID, observer: observer}
 }
 
 func (service *Service) Create(ctx context.Context, caller, idempotencyKey, destinationID string, payload json.RawMessage) (notification.Task, bool, error) {
+	outcome := "internal_error"
+	defer func() { service.observer.ObserveIntake(outcome) }()
 	target, ok := service.registry.Get(destinationID)
 	if !ok {
+		outcome = "unknown_destination"
 		return notification.Task{}, false, ErrUnknownDestination
 	}
 	hash, err := notification.RequestHash(destinationID, payload)
 	if err != nil {
+		outcome = "invalid_payload"
 		return notification.Task{}, false, fmt.Errorf("hash request: %w", err)
 	}
 	now := service.now()
@@ -62,11 +79,14 @@ func (service *Service) Create(ctx context.Context, caller, idempotencyKey, dest
 		return notification.Task{}, false, err
 	}
 	if existing == nil {
+		outcome = "accepted"
 		return task, false, nil
 	}
 	if existing.RequestHash != hash {
+		outcome = "idempotency_conflict"
 		return notification.Task{}, false, ErrIdempotencyConflict
 	}
+	outcome = "accepted"
 	return *existing, true, nil
 }
 

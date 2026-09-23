@@ -26,6 +26,13 @@ type Sender interface {
 type CapacityLimiter interface {
 	Acquire(context.Context, string, int) (func(), error)
 }
+type Observer interface {
+	ObserveDelivery(string)
+}
+type noopObserver struct{}
+
+func (noopObserver) ObserveDelivery(string) {}
+
 type Service struct {
 	repository Repository
 	sender     Sender
@@ -34,10 +41,15 @@ type Service struct {
 	now        func() time.Time
 	newLease   func() string
 	leaseTTL   time.Duration
+	observer   Observer
 }
 
-func NewService(repository Repository, sender Sender, limiter CapacityLimiter, jitter notification.Jitter, now func() time.Time, newLease func() string, leaseTTL time.Duration) *Service {
-	return &Service{repository: repository, sender: sender, limiter: limiter, jitter: jitter, now: now, newLease: newLease, leaseTTL: leaseTTL}
+func NewService(repository Repository, sender Sender, limiter CapacityLimiter, jitter notification.Jitter, now func() time.Time, newLease func() string, leaseTTL time.Duration, observers ...Observer) *Service {
+	observer := Observer(noopObserver{})
+	if len(observers) > 0 && observers[0] != nil {
+		observer = observers[0]
+	}
+	return &Service{repository: repository, sender: sender, limiter: limiter, jitter: jitter, now: now, newLease: newLease, leaseTTL: leaseTTL, observer: observer}
 }
 
 func (service *Service) Handle(ctx context.Context, message Message) Disposition {
@@ -73,5 +85,10 @@ func (service *Service) Handle(ctx context.Context, message Message) Disposition
 	if !applied {
 		return Ack
 	}
+	outcome := string(attempt.Outcome)
+	if attempt.Outcome == notification.Permanent {
+		outcome = "dead"
+	}
+	service.observer.ObserveDelivery(outcome)
 	return Ack
 }

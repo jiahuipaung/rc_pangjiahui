@@ -27,18 +27,37 @@ func (repo *fakeRepository) CreateOrGet(_ context.Context, task notification.Tas
 
 type fakeRegistry struct{ destination destination.Destination }
 
+type fakeIntakeObserver struct{ outcomes []string }
+
+func (observer *fakeIntakeObserver) ObserveIntake(outcome string) {
+	observer.outcomes = append(observer.outcomes, outcome)
+}
+
 func (registry fakeRegistry) Get(id string) (destination.Destination, bool) {
 	return registry.destination, id == registry.destination.ID
 }
 
-func newService(repo *fakeRepository) *Service {
+func newService(repo *fakeRepository, observers ...Observer) *Service {
 	parsed, _ := url.Parse("https://198.51.100.10/hook")
 	registry := fakeRegistry{destination: destination.Destination{
 		ID: "crm", Method: http.MethodPost, URL: parsed, StaticHeaders: http.Header{"Content-Type": {"application/json"}},
 		SecretHeaders: map[string]string{"Authorization": "CRM_TOKEN"}, Timeout: 5 * time.Second,
 		Retry: notification.RetryPolicy{MaxAttempts: 3, Lifetime: time.Hour, Delays: []time.Duration{time.Second}}, ConcurrencyLimit: 2,
 	}}
-	return New(repo, registry, func() time.Time { return time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC) }, sequenceID())
+	return New(repo, registry, func() time.Time { return time.Date(2026, 9, 23, 10, 0, 0, 0, time.UTC) }, sequenceID(), observers...)
+}
+
+func TestCreateObservesAcceptedAndRejectedOutcomes(t *testing.T) {
+	observer := &fakeIntakeObserver{}
+	if _, _, err := newService(&fakeRepository{}, observer).Create(t.Context(), "orders", "key-1", "crm", json.RawMessage(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := newService(&fakeRepository{}, observer).Create(t.Context(), "orders", "key-2", "missing", json.RawMessage(`{}`)); !errors.Is(err, ErrUnknownDestination) {
+		t.Fatalf("error = %v", err)
+	}
+	if len(observer.outcomes) != 2 || observer.outcomes[0] != "accepted" || observer.outcomes[1] != "unknown_destination" {
+		t.Fatalf("outcomes = %v", observer.outcomes)
+	}
 }
 
 func sequenceID() func() string {

@@ -37,3 +37,25 @@ func TestLoadRuntimeRejectsMissingDatabase(t *testing.T) {
 		t.Fatal("expected missing database URL error")
 	}
 }
+
+func TestLoadRuntimeConfiguresSplitRoleMetricsAddress(t *testing.T) {
+	environment := map[string]string{
+		"DATABASE_URL": "postgres://db/notifier", "RABBITMQ_URL": "amqp://broker/", "METRICS_ADDR": ":9191",
+	}
+	lookup := func(key string) (string, bool) { value, ok := environment[key]; return value, ok }
+	config, err := LoadRuntime(RolePublisher, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MetricsAddr != ":9191" {
+		t.Fatalf("metrics address = %q, want :9191", config.MetricsAddr)
+	}
+	delete(environment, "METRICS_ADDR")
+	config, err = LoadRuntime(RoleScheduler, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.MetricsAddr != ":9090" {
+		t.Fatalf("default metrics address = %q, want :9090", config.MetricsAddr)
+	}
+}
