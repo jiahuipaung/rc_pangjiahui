@@ -180,26 +180,82 @@ func TestDeliveryResultRejectsStaleLease(t *testing.T) {
 
 func TestScheduleDueRecoversExpiredLeaseOnce(t *testing.T) {
 	store := newStore(t)
-	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), fixtureTask("n-1", "key-1")) }); err != nil { t.Fatalf("seed: %v", err) }
-	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil { t.Fatalf("claim: %v", err) }
+	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), fixtureTask("n-1", "key-1")) }); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
 	result, err := store.ScheduleDue(t.Context(), time.Now(), 10)
-	if err != nil { t.Fatalf("ScheduleDue: %v", err) }
-	if result.Scheduled != 1 || result.RecoveredLeases != 1 { t.Fatalf("result = %+v", result) }
+	if err != nil {
+		t.Fatalf("ScheduleDue: %v", err)
+	}
+	if result.Scheduled != 1 || result.RecoveredLeases != 1 {
+		t.Fatalf("result = %+v", result)
+	}
 	second, err := store.ScheduleDue(t.Context(), time.Now(), 10)
-	if err != nil { t.Fatalf("second ScheduleDue: %v", err) }
-	if second.Scheduled != 0 { t.Fatalf("second result = %+v", second) }
+	if err != nil {
+		t.Fatalf("second ScheduleDue: %v", err)
+	}
+	if second.Scheduled != 0 {
+		t.Fatalf("second result = %+v", second)
+	}
 	var events int
-	if err := store.pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox_events WHERE aggregate_id='n-1'").Scan(&events); err != nil { t.Fatal(err) }
-	if events != 1 { t.Fatalf("outbox events = %d, want 1", events) }
+	if err := store.pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox_events WHERE aggregate_id='n-1'").Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 {
+		t.Fatalf("outbox events = %d, want 1", events)
+	}
 }
 
 func TestScheduleDueMovesExhaustedTaskToDead(t *testing.T) {
 	store := newStore(t)
 	task := fixtureTask("n-1", "key-1")
 	task.Snapshot.Retry.MaxAttempts = 1
-	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), task) }); err != nil { t.Fatalf("seed: %v", err) }
-	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil { t.Fatalf("claim: %v", err) }
+	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), task) }); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := store.ClaimDelivery(t.Context(), "n-1", "lease-1", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
 	result, err := store.ScheduleDue(t.Context(), time.Now(), 10)
-	if err != nil { t.Fatalf("ScheduleDue: %v", err) }
-	if result.Dead != 1 || result.Scheduled != 0 { t.Fatalf("result = %+v", result) }
+	if err != nil {
+		t.Fatalf("ScheduleDue: %v", err)
+	}
+	if result.Dead != 1 || result.Scheduled != 0 {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+func TestReplayDeadIsAtomicAndOwnerQueryIsScoped(t *testing.T) {
+	store := newStore(t)
+	if err := store.WithTx(t.Context(), func(tx Tx) error { return tx.CreateNotification(t.Context(), fixtureTask("n-1", "key-1")) }); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := store.pool.Exec(t.Context(), "UPDATE notification_tasks SET status='dead',dead_at=now() WHERE id='n-1'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetForCaller(t.Context(), "other-caller", "n-1"); !errors.Is(err, notification.ErrTaskNotFound) {
+		t.Fatalf("cross-caller query error = %v", err)
+	}
+	applied, err := store.ReplayDeadAtomic(t.Context(), "n-1", time.Now(), "replay-event-1")
+	if err != nil || !applied {
+		t.Fatalf("ReplayDeadAtomic = %v, %v", applied, err)
+	}
+	var status string
+	var events int
+	if err := store.pool.QueryRow(t.Context(), "SELECT status FROM notification_tasks WHERE id='n-1'").Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pool.QueryRow(t.Context(), "SELECT count(*) FROM outbox_events WHERE aggregate_id='n-1'").Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if status != "pending" || events != 1 {
+		t.Fatalf("status=%s events=%d", status, events)
+	}
+	second, err := store.ReplayDeadAtomic(t.Context(), "n-1", time.Now(), "replay-event-2")
+	if err != nil || second {
+		t.Fatalf("second replay = %v, %v", second, err)
+	}
 }
