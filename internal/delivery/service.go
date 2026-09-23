@@ -30,18 +30,15 @@ type Service struct {
 	repository Repository
 	sender     Sender
 	limiter    CapacityLimiter
+	jitter     notification.Jitter
 	now        func() time.Time
 	newLease   func() string
 	leaseTTL   time.Duration
 }
 
-func NewService(repository Repository, sender Sender, limiter CapacityLimiter, now func() time.Time, newLease func() string, leaseTTL time.Duration) *Service {
-	return &Service{repository: repository, sender: sender, limiter: limiter, now: now, newLease: newLease, leaseTTL: leaseTTL}
+func NewService(repository Repository, sender Sender, limiter CapacityLimiter, jitter notification.Jitter, now func() time.Time, newLease func() string, leaseTTL time.Duration) *Service {
+	return &Service{repository: repository, sender: sender, limiter: limiter, jitter: jitter, now: now, newLease: newLease, leaseTTL: leaseTTL}
 }
-
-type noJitter struct{}
-
-func (noJitter) Apply(delay time.Duration) time.Duration { return delay }
 
 func (service *Service) Handle(ctx context.Context, message Message) Disposition {
 	lease, now := service.newLease(), service.now()
@@ -62,7 +59,7 @@ func (service *Service) Handle(ctx context.Context, message Message) Disposition
 	}()
 	attempt := notification.AttemptResult{Outcome: result.Outcome, HTTPStatus: result.HTTPStatus, ErrorCode: result.ErrorCode, ErrorMessage: result.ErrorMessage, CompletedAt: service.now()}
 	if result.Outcome == notification.Retryable {
-		next, ok := notification.NextAttempt(claim.Task.Snapshot.Retry, claim.Task.AttemptCount, result.RetryAfter, attempt.CompletedAt, noJitter{})
+		next, ok := notification.NextAttempt(claim.Task.Snapshot.Retry, claim.Task.AttemptCount, result.RetryAfter, attempt.CompletedAt, service.jitter)
 		if ok {
 			attempt.NextAttemptAt = &next
 		} else {
