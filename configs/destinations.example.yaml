@@ -1,0 +1,14 @@
+destinations:
+  - id: inventory-system
+    method: POST
+    url: https://inventory.example.com/v1/notifications
+    static_headers:
+      Content-Type: application/json
+    secret_headers:
+      Authorization: INVENTORY_API_TOKEN
+    timeout: 5s
+    max_attempts: 8
+    lifetime: 24h
+    retry_delays: [5s, 30s, 2m, 10m, 30m, 2h, 8h]
+    concurrency_limit: 10
+
